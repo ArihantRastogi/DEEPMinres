@@ -70,36 +70,132 @@ Note that dataset are located at `../icml2023data` if users follow the steps in 
 python3 test_all_cg.py --help
 ```
 
-## Training
-### Dataset
-We generated our dataset using Ritz vectors, and the dataset generating code is at `src/datasetcreate.py`. Note that our dataset for training for each dimention, **[here](https://www.dropbox.com/s/nxxd969y5ow2opv/datasets.tar.gz?dl=0)** . Download to the ```project source directory``` and extract all data files.
+## Working with Datasets
+
+### Using Pre-built Datasets
+
+We provide pre-built datasets for training the models. You can download them **[here](https://www.dropbox.com/s/nxxd969y5ow2opv/datasets.tar.gz?dl=0)**. Download to the ```project source directory``` and extract all data files:
+
 ```
 tar -zxvf datasets.tar.gz
-cd icml2023data
-tar -zxvf datasets.tar.gz
 ```
+
+This will create a `datasets` directory in your project structure:
 
 ```
 .
 └── (Project Source Directory)
     ├── src
     └── icml2023data
-    └── <span style="color: red; ">datasets</span>
+    └── datasets
 ```
 
 ### Dataset Creation
-You can also generate the dataset by yourself with `src/datasetcreate.py`. 
+
+#### Method 1: Using Ritz Vectors (Physics-based)
+
+You can generate datasets based on Ritz vectors using `src/datasetcreate.py`. This creates training vectors that capture the important characteristics of the solution space for fluid simulation matrices:
+
 ```
 cd src/
 python3 datasetcreate.py --dataset_dir <dataset_path> --output_dir <directory_to_save_the_newly_created_dataset>
 ```
-After creating the new dataset, if you like to use it for the training, you should change the path(foldername) in line 171 and 181 in train.py
 
-### Training model
+Additional parameters:
+```
+  -N, --resolution             Grid resolution (64 or 128)
+  --number_of_base_ritz_vectors Total number of Ritz vectors to use
+  --sample_size                Number of vectors to generate for the dataset
+  --theta                      Parameter controlling eigenvalue weighting (see paper)
+```
+
+#### Method 2: Using Custom Test Matrices (Matrix Creator)
+
+For experimenting with different types of matrices or problem domains, we provide a `matrix_creator.py` utility to generate sparse test matrices:
+
+```
+cd lib/
+python3 matrix_creator.py --dim <matrix_dimension> --matrix_type <type> --output_dir <directory_to_save>
+```
+
+Key options:
+```
+  --dim DIM                  Dimension of the matrix
+  --N N                      Grid size for structured problems (for Poisson matrices)
+  --matrix_type {diag_dominant,poisson}
+                            Type of matrix to create
+  --poisson_dim {1,2,3}      Dimension for Poisson matrix (1D, 2D, or 3D)
+  --symmetric                Make matrix symmetric
+  --positive_definite        Make matrix positive definite
+  --density DENSITY          Sparsity density for random matrices
+  --dtype {f,d}              Data type (f=float, d=double)
+  --create_rhs               Create and save right-hand side vector
+```
+
+Example usages:
+
+1. Create a 3D Poisson matrix (64³ grid):
+```
+python matrix_creator.py --dim 262144 --N 64 --matrix_type poisson --poisson_dim 3 --create_rhs
+```
+
+2. Create a symmetric positive-definite matrix:
+```
+python matrix_creator.py --dim 10000 --matrix_type diag_dominant --symmetric --positive_definite --create_rhs
+```
+
+3. Generate test matrices for MINRES evaluation:
+```
+python matrix_creator.py --dim 10000 --matrix_type diag_dominant --symmetric --density 0.01 --create_rhs
+```
+
+The generated matrices and vectors are saved in the binary format compatible with the existing code and can be loaded using the helper functions in the project.
+
+### Creating Datasets with Generated Matrices
+
+After creating custom matrices, you can use them to create training datasets by:
+
+1. Save your matrices in the project's expected binary format
+2. Run the dataset creation script pointing to your custom matrices
+3. Use the resulting dataset for training
+
+```
+# First create matrices
+python lib/matrix_creator.py --dim 10000 --matrix_type diag_dominant --symmetric --positive_definite --create_rhs --output_dir custom_matrices
+
+# Then create dataset based on these matrices
+python src/datasetcreate.py --dataset_dir custom_matrices --output_dir custom_dataset
+```
+
+### Using Custom Datasets for Training
+
+After creating a new dataset, you need to update the dataset path in the training script. Edit lines 171-173 in `train.py`:
+
+```python
+if N == 64:
+    foldername = "<path_to_your_new_dataset>/N64/"
+elif N == 128:
+    foldername = "<path_to_your_new_dataset>/N128/"
+```
+
+Or you can specify the path directly when running the training script.
+
+## Training model
 Pre-trained models can be found `icml2023data/trained_models`. If the you want to generate dataset by yourself, you can run the following commands:
 ```
 cd src/
 python train.py -N <dimention> --total_number_of_epochs <total epoch number> --epoch_each_number <epoch number for saved model> --batch_size <batch size> --loading_number <loading data size for once> --gpu_usage <gpu usage memory 1024*int> --data_dir <data path to the icml2023data>
+```
+
+## Testing with Custom Matrices
+
+To test the performance of different solvers on your custom matrices:
+
+1. Create test matrices using `matrix_creator.py`
+2. Use the testing scripts with your matrices:
+
+```
+python src/test_all_cg.py --dataset_dir <path_to_custom_matrices>
 ```
 
 # Linear System Solvers: Performance Analysis and Findings
