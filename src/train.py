@@ -176,7 +176,7 @@ validation_loss = []
 
 # if you want to use your own dataset, you can change here.
 if N == 64:
-    foldername = "../datasets/N64/b_rhs_20000_10000_ritz_vectors_newA_90_10_random_N64/"
+    foldername = "../custom_matrices/poisson_dim262144_pdim3_sym_pd_rhs.bin"
 elif N == 128:
     foldername = "../datasets/N128/b_rhs_20000_10000_ritz_vectors_newA_90_10_random_N128/"
 

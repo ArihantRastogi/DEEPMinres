@@ -573,60 +573,99 @@ class ConjugateGradientSparse:
         
         return Q, diagonal, sub_diagonal
     
-#from numba import njit, prange
-#    @njit(parallel=True)
     def lanczos_iteration_with_normalization_correction_parallel(self, b, max_it=10, tol=1.0e-10):
+        """
+        Lanczos iteration with normalization correction using TensorFlow for GPU acceleration.
+        """
+        # Check if GPU is available
+        physical_devices = tf.config.list_physical_devices('GPU')
+        if len(physical_devices) > 0:
+            print(f"Using GPU: {physical_devices[0].name}")
+            tf.config.experimental.set_memory_growth(physical_devices[0], True)
+        else:
+            print("No GPU found, using CPU instead")
+        
         Q = np.zeros([max_it, len(b)])
-        if max_it==1:
-            Q[0]=b.copy()
-            Q[0]=Q[0]/self.norm(Q[0])
-            return Q, [np.dot(Q[0],self.multiply_A_sparse(Q[0]))], []
-        if max_it<=0:
+        
+        if max_it == 1:
+            Q[0] = b.copy()
+            Q[0] = Q[0] / self.norm(Q[0])
+            return Q, [np.dot(Q[0], self.multiply_A_sparse(Q[0]))], []
+        
+        if max_it <= 0:
             print("CG.lanczos_iteration: max_it can never be less than 0")
+        
         if max_it > self.n:
             max_it = self.n
-            print("max_it is reduced to the dimension ",self.n)
+            print("max_it is reduced to the dimension ", self.n)
+        
         diagonal = np.zeros(max_it)
         sub_diagonal = np.zeros(max_it)
-        #norm_b = np.linalg.norm(b)
         norm_b = self.norm(b)
-        Q[0] = b.copy()/norm_b
-        #Q[1] = np.matmul(self.A, Q[0])
+        
+        # Initialize first vectors
+        Q[0] = b.copy() / norm_b
         Q[1] = self.multiply_A_sparse(Q[0])
-        diagonal[0] = np.dot(Q[1],Q[0])
-        Q[1] = Q[1] - diagonal[0]*Q[0]
-        #sub_diagonal[0] = np.linalg.norm(Q[1])
+        diagonal[0] = np.dot(Q[1], Q[0])
+        Q[1] = Q[1] - diagonal[0] * Q[0]
         sub_diagonal[0] = self.norm(Q[1])
-        Q[1] = Q[1]/sub_diagonal[0]
-        if sub_diagonal[0]<tol:
-            Q = np.resize(Q,[1,self.n])
+        Q[1] = Q[1] / sub_diagonal[0]
+        
+        if sub_diagonal[0] < tol:
+            Q = np.resize(Q, [1, self.n])
             diagonal = np.resize(diagonal, [1])
             sub_diagonal = np.resize(sub_diagonal, [0])
             return Q, diagonal, sub_diagonal
         
+        # Convert Q to TensorFlow tensor for GPU processing
+        # We'll update Q in batches, so we keep the numpy version for updates
         invariant_subspace = False
         it = 1
-        while ((it<max_it-1) and (not invariant_subspace)):
-            if it%100==0:
-                print("Lanczoz iteration at = ",it)
-            #Q[it+1] = np.matmul(self.A, Q[it])
-            Q[it+1] = self.multiply_A_sparse(Q[it])
-            diagonal[it] = np.dot(Q[it],Q[it+1])            
-            v = Q[it+1] - diagonal[it]*Q[it]-sub_diagonal[it-1]*Q[it-1]
-            for j in range(it-1):
-                vQj = self.dot(v, Q[j])
-                for jj in range(v.shape[1]):
-                    v[jj] = v[jj] - Q[j,jj]*vQj
+        
+        while ((it < max_it - 1) and (not invariant_subspace)):
+            if it % 100 == 0:
+                print("Lanczos iteration at = ", it)
+            
+            # GPU part - calculate multiplication and orthogonalization
+            with tf.device('/GPU:0'):
+                # Calculate Q[it+1] = A * Q[it]
+                q_next = self.multiply_A_sparse(Q[it])
+                diagonal[it] = np.dot(Q[it], q_next)
+                
+                # Initial subtraction
+                v = q_next - diagonal[it] * Q[it] - sub_diagonal[it-1] * Q[it-1]
+                
+                # Orthogonalize against previous vectors
+                if it > 1:
+                    # Convert previous Q vectors to tensor for GPU processing
+                    prev_q = tf.convert_to_tensor(Q[:it], dtype=tf.float32)
+                    v_tensor = tf.convert_to_tensor(v, dtype=tf.float32)
+                    
+                    # Calculate dot products in batch on GPU
+                    dots = tf.reduce_sum(tf.multiply(prev_q, tf.reshape(v_tensor, [1, -1])), axis=1)
+                    
+                    # Subtract contributions from previous vectors
+                    contributions = tf.reshape(dots, [-1, 1]) * prev_q
+                    total_contribution = tf.reduce_sum(contributions, axis=0)
+                    
+                    # Update v by subtracting the contributions
+                    v = v - total_contribution.numpy()
+            
+            # Update Q, calculate norm and check convergence (CPU part)
             Q[it+1] = v.copy()
             sub_diagonal[it] = self.norm(Q[it+1])
-            Q[it+1] = Q[it+1]/sub_diagonal[it]
+            Q[it+1] = Q[it+1] / sub_diagonal[it]
+            
             if sub_diagonal[it] < tol:
                 invariant_subspace = True
-            it = it+1
             
-        Q = np.resize(Q, [it+1,self.n])
+            it = it + 1
+        
+        # Resize arrays to actual size used
+        Q = np.resize(Q, [it+1, self.n])
         diagonal = np.resize(diagonal, [it+1])
         sub_diagonal = np.resize(sub_diagonal, [it])
+        
         if not invariant_subspace:
             diagonal[it] = np.dot(Q[it], self.multiply_A_sparse(Q[it]))
         

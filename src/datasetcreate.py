@@ -52,7 +52,12 @@ rand_vec_x = np.random.normal(0,1, [N**3])
 rand_vec = A.dot(rand_vec_x)
 #%% Creating Lanczos Vectors:
 print("Lanczos Iteration is running...")
-W, diagonal, sub_diagonal = CG.lanczos_iteration_with_normalization_correction(rand_vec, num_ritz_vectors) #this can be loaded directly from c++ output
+try:
+    W, diagonal, sub_diagonal = CG.lanczos_iteration_with_normalization_correction_parallel(rand_vec, num_ritz_vectors)
+except Exception as e:
+    print(f"Parallel Lanczos iteration failed with error: {e}")
+    print("Falling back to non-parallel version...")
+    W, diagonal, sub_diagonal = CG.lanczos_iteration_with_normalization_correction(rand_vec, num_ritz_vectors)
 print("Lanczos Iteration finished.")
 
 #%% Create the tridiagonal matrix from diagonal and subdiagonal entries
