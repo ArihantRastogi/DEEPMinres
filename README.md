@@ -16,7 +16,7 @@ This implementation focuses on solving systems of the form **Ax = b**, where **A
 
 ## Dependencies
 
-The following Python libraries are required:
+Python libraries required:
 
 ```python
 numpy
